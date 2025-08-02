@@ -64,10 +64,7 @@ try {
                         <button class="btn btn-outline-secondary" onclick="window.print()">Print</button>
                     </div>
                 </div>
-                <?php if (isset($_SESSION['error_message'])): ?>
-                    <div class="alert alert-danger"><?= esc_html($_SESSION['error_message']) ?></div>
-                    <?php unset($_SESSION['error_message']); ?>
-                <?php endif; ?>
+                <?php ErrorHandler::displayMessages(); ?>
                 <div class="row mb-4">
                     <div class="col-md-4">
                         <div class="card">

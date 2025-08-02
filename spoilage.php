@@ -48,24 +48,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['success_message'] = 'Spoilage record added successfully.';
     } catch (Exception $e) {
         $pdo->rollBack();
-        error_log("Spoilage error: " . $e->getMessage());
-        $_SESSION['error_message'] = 'Error: ' . $e->getMessage();
+        ErrorHandler::handleDatabaseError($e, 'Error recording spoilage. Please try again.');
     }
     header('Location: spoilage.php?page=' . $page);
     exit;
 }
 
-$meatTypes = $pdo->query('SELECT * FROM meat_types ORDER BY name')->fetchAll(PDO::FETCH_ASSOC);
-$storageLocations = $pdo->query('SELECT * FROM storage_locations ORDER BY name')->fetchAll(PDO::FETCH_ASSOC);
-$spoilageRecords = $pdo->query("
+// Use prepared statements for better security
+$stmt = $pdo->prepare('SELECT * FROM meat_types ORDER BY name');
+$stmt->execute();
+$meatTypes = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+$stmt = $pdo->prepare('SELECT * FROM storage_locations ORDER BY name');
+$stmt->execute();
+$storageLocations = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+$stmt = $pdo->prepare("
     SELECT s.*, mt.name as meat_type, sl.name as storage_location, u.name as recorded_by_name
     FROM spoilage s
     JOIN meat_types mt ON s.meat_type_id = mt.id
     JOIN storage_locations sl ON s.storage_location_id = sl.id
     JOIN users u ON s.recorded_by = u.id
     ORDER BY s.recorded_at DESC
-    LIMIT $perPage OFFSET $offset
-")->fetchAll(PDO::FETCH_ASSOC);
+    LIMIT ? OFFSET ?
+");
+$stmt->execute([$perPage, $offset]);
+$spoilageRecords = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="en">

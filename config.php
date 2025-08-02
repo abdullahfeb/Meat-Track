@@ -1,11 +1,25 @@
 <?php
+// Enhanced session security
+ini_set('session.cookie_httponly', 1);
+ini_set('session.cookie_secure', isset($_SERVER['HTTPS']));
+ini_set('session.use_strict_mode', 1);
+ini_set('session.cookie_samesite', 'Strict');
+
 session_start();
 
-// Database configuration
+// Regenerate session ID on login for security
+if (!isset($_SESSION['initiated'])) {
+    session_regenerate_id(true);
+    $_SESSION['initiated'] = true;
+}
+require_once 'error_handler.php';
+require_once 'validation.php';
+
+// Database configuration for XAMPP
 define('DB_HOST', 'localhost');
-define('DB_NAME', 'meattrack');
-define('DB_USER', 'meattrack_user'); // Replace with your MySQL username
-define('DB_PASS', 'secure_password'); // Replace with your MySQL password
+define('DB_NAME', 'meettrack');
+define('DB_USER', 'root'); // Default XAMPP MySQL username
+define('DB_PASS', ''); // Default XAMPP MySQL password (empty)
 
 try {
     $pdo = new PDO(

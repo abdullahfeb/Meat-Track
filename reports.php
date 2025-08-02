@@ -2,42 +2,67 @@
 require 'config.php';
 requireAuth();
 
-$reportType = $_GET['type'] ?? 'inventory';
+// Validate and sanitize input parameters
+$allowedReportTypes = ['inventory', 'spoilage', 'distribution'];
+$reportType = in_array($_GET['type'] ?? 'inventory', $allowedReportTypes) ? $_GET['type'] : 'inventory';
+
+// Validate date formats and ranges
 $startDate = $_GET['start_date'] ?? date('Y-m-d', strtotime('-30 days'));
 $endDate = $_GET['end_date'] ?? date('Y-m-d');
+
+// Validate date format
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $startDate) || !strtotime($startDate)) {
+    $startDate = date('Y-m-d', strtotime('-30 days'));
+}
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $endDate) || !strtotime($endDate)) {
+    $endDate = date('Y-m-d');
+}
+
+// Ensure start date is not after end date
+if (strtotime($startDate) > strtotime($endDate)) {
+    $temp = $startDate;
+    $startDate = $endDate;
+    $endDate = $temp;
+}
 
 try {
     $data = [];
     if ($reportType === 'inventory') {
-        $data = $pdo->query("
+        $stmt = $pdo->prepare("
             SELECT i.batch_number, mt.name as meat_type, i.quantity, i.status, i.expiry_date, sl.name as storage_location
             FROM inventory i
             JOIN meat_types mt ON i.meat_type_id = mt.id
             JOIN storage_locations sl ON i.storage_location_id = sl.id
             WHERE i.created_at BETWEEN ? AND ?
             ORDER BY i.created_at DESC
-        ")->fetchAll(PDO::FETCH_ASSOC, [$startDate, $endDate]);
+        ");
+        $stmt->execute([$startDate, $endDate]);
+        $data = $stmt->fetchAll(PDO::FETCH_ASSOC);
     } elseif ($reportType === 'spoilage') {
-        $data = $pdo->query("
+        $stmt = $pdo->prepare("
             SELECT s.batch_number, mt.name as meat_type, s.quantity, s.reason, s.disposal_method, s.recorded_at
             FROM spoilage s
             JOIN meat_types mt ON s.meat_type_id = mt.id
             WHERE s.recorded_at BETWEEN ? AND ?
             ORDER BY s.recorded_at DESC
-        ")->fetchAll(PDO::FETCH_ASSOC, [$startDate, $endDate]);
+        ");
+        $stmt->execute([$startDate, $endDate]);
+        $data = $stmt->fetchAll(PDO::FETCH_ASSOC);
     } elseif ($reportType === 'distribution') {
-        $data = $pdo->query("
+        $stmt = $pdo->prepare("
             SELECT d.delivery_id, d.destination, d.scheduled_datetime, d.status, SUM(di.quantity) as total_quantity
             FROM distribution d
             JOIN distribution_items di ON d.id = di.distribution_id
             WHERE d.created_at BETWEEN ? AND ?
             GROUP BY d.id
             ORDER BY d.created_at DESC
-        ")->fetchAll(PDO::FETCH_ASSOC, [$startDate, $endDate]);
+        ");
+        $stmt->execute([$startDate, $endDate]);
+        $data = $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 } catch (PDOException $e) {
-    error_log("Reports error: " . $e->getMessage());
-    $_SESSION['error_message'] = 'Error generating report.';
+    ErrorHandler::handleDatabaseError($e, 'Error generating report. Please try again.');
+    $data = [];
 }
 ?>
 <!DOCTYPE html>

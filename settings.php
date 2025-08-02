@@ -57,14 +57,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['success_message'] = 'Settings updated successfully.';
     } catch (Exception $e) {
         $pdo->rollBack();
-        error_log("Settings error: " . $e->getMessage());
-        $_SESSION['error_message'] = 'Error: ' . $e->getMessage();
+        ErrorHandler::handleDatabaseError($e, 'Error updating settings. Please try again.');
     }
     header('Location: settings.php');
     exit;
 }
 
-$settings = $pdo->query('SELECT * FROM system_settings WHERE id = 1')->fetch(PDO::FETCH_ASSOC);
+// Use prepared statement for settings query
+$stmt = $pdo->prepare('SELECT * FROM system_settings WHERE id = 1');
+$stmt->execute();
+$settings = $stmt->fetch(PDO::FETCH_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="en">
