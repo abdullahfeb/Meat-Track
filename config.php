@@ -1,11 +1,12 @@
 <?php
 session_start();
+require_once 'error_handler.php';
 
-// Database configuration
+// Database configuration for XAMPP
 define('DB_HOST', 'localhost');
-define('DB_NAME', 'meattrack');
-define('DB_USER', 'meattrack_user'); // Replace with your MySQL username
-define('DB_PASS', 'secure_password'); // Replace with your MySQL password
+define('DB_NAME', 'meettrack');
+define('DB_USER', 'root'); // Default XAMPP MySQL username
+define('DB_PASS', ''); // Default XAMPP MySQL password (empty)
 
 try {
     $pdo = new PDO(
