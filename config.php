@@ -1,6 +1,19 @@
 <?php
+// Enhanced session security
+ini_set('session.cookie_httponly', 1);
+ini_set('session.cookie_secure', isset($_SERVER['HTTPS']));
+ini_set('session.use_strict_mode', 1);
+ini_set('session.cookie_samesite', 'Strict');
+
 session_start();
+
+// Regenerate session ID on login for security
+if (!isset($_SESSION['initiated'])) {
+    session_regenerate_id(true);
+    $_SESSION['initiated'] = true;
+}
 require_once 'error_handler.php';
+require_once 'validation.php';
 
 // Database configuration for XAMPP
 define('DB_HOST', 'localhost');

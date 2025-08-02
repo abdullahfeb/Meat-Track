@@ -33,29 +33,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['success_message'] = 'Condition record added successfully.';
     } catch (Exception $e) {
         $pdo->rollBack();
-        error_log("Monitoring error: " . $e->getMessage());
-        $_SESSION['error_message'] = 'Error: ' . $e->getMessage();
+        ErrorHandler::handleDatabaseError($e, 'Error recording condition data. Please try again.');
     }
     header('Location: monitoring.php?page=' . $page);
     exit;
 }
 
-$storageLocations = $pdo->query('SELECT * FROM storage_locations ORDER BY name')->fetchAll(PDO::FETCH_ASSOC);
-$conditions = $pdo->query("
+// Use prepared statements for better security
+$stmt = $pdo->prepare('SELECT * FROM storage_locations ORDER BY name');
+$stmt->execute();
+$storageLocations = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+$stmt = $pdo->prepare("
     SELECT cm.*, sl.name as location_name
     FROM condition_monitoring cm
     JOIN storage_locations sl ON cm.storage_location_id = sl.id
     ORDER BY cm.recorded_at DESC
-    LIMIT $perPage OFFSET $offset
-")->fetchAll(PDO::FETCH_ASSOC);
+    LIMIT ? OFFSET ?
+");
+$stmt->execute([$perPage, $offset]);
+$conditions = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-$tempData = $pdo->query("
+$stmt = $pdo->prepare("
     SELECT sl.name as location_name, cm.temperature, cm.recorded_at
     FROM condition_monitoring cm
     JOIN storage_locations sl ON cm.storage_location_id = sl.id
     ORDER BY cm.recorded_at DESC
     LIMIT 50
-")->fetchAll(PDO::FETCH_ASSOC);
+");
+$stmt->execute();
+$tempData = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="en">

@@ -42,13 +42,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             header('Content-Disposition: attachment; filename="inventory.csv"');
             $output = fopen('php://output', 'w');
             fputcsv($output, ['Batch #', 'Meat Type', 'Cut Type', 'Quantity (kg)', 'Processing Date', 'Expiry Date', 'Storage Location', 'Status', 'Quality Notes']);
-            $records = $pdo->query('
+            $stmt = $pdo->prepare('
                 SELECT i.batch_number, mt.name as meat_type, i.cut_type, i.quantity, i.processing_date, i.expiry_date, sl.name as storage_location, i.status, i.quality_notes
                 FROM inventory i
                 JOIN meat_types mt ON i.meat_type_id = mt.id
                 JOIN storage_locations sl ON i.storage_location_id = sl.id
                 ORDER BY i.created_at DESC
-            ')->fetchAll(PDO::FETCH_ASSOC);
+            ');
+            $stmt->execute();
+            $records = $stmt->fetchAll(PDO::FETCH_ASSOC);
             foreach ($records as $record) {
                 fputcsv($output, [
                     $record['batch_number'],
@@ -68,23 +70,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $pdo->commit();
     } catch (Exception $e) {
         $pdo->rollBack();
-        error_log("Inventory error: " . $e->getMessage());
-        $_SESSION['error_message'] = 'Error: ' . $e->getMessage();
+        ErrorHandler::handleDatabaseError($e, 'Error processing inventory operation. Please try again.');
     }
     header('Location: inventory.php?page=' . $page);
     exit;
 }
 
-$meatTypes = $pdo->query('SELECT * FROM meat_types ORDER BY name')->fetchAll(PDO::FETCH_ASSOC);
-$storageLocations = $pdo->query('SELECT * FROM storage_locations ORDER BY name')->fetchAll(PDO::FETCH_ASSOC);
-$inventoryItems = $pdo->query("
+// Use prepared statements for better security
+$stmt = $pdo->prepare('SELECT * FROM meat_types ORDER BY name');
+$stmt->execute();
+$meatTypes = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+$stmt = $pdo->prepare('SELECT * FROM storage_locations ORDER BY name');
+$stmt->execute();
+$storageLocations = $stmt->fetchAll(PDO::FETCH_ASSOC);
+// Fix SQL injection vulnerability by using prepared statements
+$stmt = $pdo->prepare("
     SELECT i.*, mt.name as meat_type, sl.name as storage_location
     FROM inventory i
     JOIN meat_types mt ON i.meat_type_id = mt.id
     JOIN storage_locations sl ON i.storage_location_id = sl.id
     ORDER BY i.created_at DESC
-    LIMIT $perPage OFFSET $offset
-")->fetchAll(PDO::FETCH_ASSOC);
+    LIMIT ? OFFSET ?
+");
+$stmt->execute([$perPage, $offset]);
+$inventoryItems = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="en">

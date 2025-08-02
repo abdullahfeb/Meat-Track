@@ -9,28 +9,44 @@ $offset = ($page - 1) * $perPage;
 
 // Handle inventory form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'add_inventory') {
-    if (!hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'])) {
-        $_SESSION['error_message'] = "Invalid CSRF token.";
+    if (!Validator::validateCSRF($_POST['csrf_token'] ?? '')) {
+        ErrorHandler::setUserError("Invalid CSRF token.");
     } else {
-        try {
-            $stmt = $pdo->prepare("
-                INSERT INTO inventory (batch_number, meat_type_id, cut_type, quantity, processing_date, expiry_date, storage_location_id, quality_notes, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'good')
-            ");
-            $stmt->execute([
-                $_POST['batch_number'],
-                $_POST['meat_type_id'],
-                $_POST['cut_type'] ?: null,
-                $_POST['quantity'],
-                $_POST['processing_date'],
-                $_POST['expiry_date'],
-                $_POST['storage_location_id'],
-                $_POST['quality_notes'] ?: null
-            ]);
-            $_SESSION['success_message'] = "Inventory added successfully.";
-        } catch (PDOException $e) {
-            error_log("Error adding inventory: " . $e->getMessage());
-            $_SESSION['error_message'] = "Error adding inventory.";
+        // Validate input data
+        $validation = Validator::validateArray($_POST, ValidationRules::getInventoryRules());
+        
+        if (!$validation['valid']) {
+            foreach ($validation['errors'] as $error) {
+                ErrorHandler::setUserError($error);
+                break; // Show first error only
+            }
+        } else {
+            try {
+                $data = $validation['data'];
+                
+                // Additional business logic validation
+                if (strtotime($data['expiry_date']) <= strtotime($data['processing_date'])) {
+                    ErrorHandler::setUserError("Expiry date must be after processing date.");
+                } else {
+                    $stmt = $pdo->prepare("
+                        INSERT INTO inventory (batch_number, meat_type_id, cut_type, quantity, processing_date, expiry_date, storage_location_id, quality_notes, status)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'good')
+                    ");
+                    $stmt->execute([
+                        $data['batch_number'],
+                        $data['meat_type_id'],
+                        $data['cut_type'],
+                        $data['quantity'],
+                        $data['processing_date'],
+                        $data['expiry_date'],
+                        $data['storage_location_id'],
+                        $data['quality_notes']
+                    ]);
+                    ErrorHandler::setUserSuccess("Inventory added successfully.");
+                }
+            } catch (PDOException $e) {
+                ErrorHandler::handleDatabaseError($e, "Error adding inventory. Please try again.");
+            }
         }
     }
     header('Location: inventory_management.php?page=' . $page);
@@ -39,19 +55,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
 // Dismiss alert
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['dismiss_alert'])) {
-    if (!hash_equals($_SESSION['csrf_token'], $_POST['csrf_token'])) {
-        $_SESSION['error_message'] = "Invalid CSRF token.";
+    if (!Validator::validateCSRF($_POST['csrf_token'] ?? '')) {
+        ErrorHandler::setUserError("Invalid CSRF token.");
     } else {
-        try {
-            $stmt = $pdo->prepare("
-                INSERT INTO dismissed_alerts (user_id, alert_identifier)
-                VALUES (?, ?)
-                ON DUPLICATE KEY UPDATE dismissed_at = NOW()
-            ");
-            $stmt->execute([$_SESSION['user_id'], $_POST['alert_identifier']]);
-        } catch (PDOException $e) {
-            error_log("Error dismissing alert: " . $e->getMessage());
-            $_SESSION['error_message'] = "Error dismissing alert.";
+        $alertId = Validator::sanitizeText($_POST['alert_identifier'] ?? '');
+        if (empty($alertId) || !preg_match('/^(inv|cond)_\d+$/', $alertId)) {
+            ErrorHandler::setUserError("Invalid alert identifier.");
+        } else {
+            try {
+                $stmt = $pdo->prepare("
+                    INSERT INTO dismissed_alerts (user_id, alert_identifier)
+                    VALUES (?, ?)
+                    ON DUPLICATE KEY UPDATE dismissed_at = NOW()
+                ");
+                $stmt->execute([$_SESSION['user_id'], $alertId]);
+                ErrorHandler::setUserSuccess("Alert dismissed successfully.");
+            } catch (PDOException $e) {
+                ErrorHandler::handleDatabaseError($e, "Error dismissing alert. Please try again.");
+            }
         }
     }
     header('Location: inventory_management.php?page=' . $page);
@@ -216,21 +237,7 @@ $totalInventoryPages = ceil($totalInventoryCount / $perPage);
                     </div>
                 </div>
 
-                <?php if (isset($_SESSION['error_message'])): ?>
-                    <div class="alert alert-danger alert-dismissible fade show" role="alert">
-                        <i class="fas fa-exclamation-triangle me-2"></i><?= esc_html($_SESSION['error_message']) ?>
-                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                    </div>
-                    <?php unset($_SESSION['error_message']); ?>
-                <?php endif; ?>
-
-                <?php if (isset($_SESSION['success_message'])): ?>
-                    <div class="alert alert-success alert-dismissible fade show" role="alert">
-                        <i class="fas fa-check-circle me-2"></i><?= esc_html($_SESSION['success_message']) ?>
-                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                    </div>
-                    <?php unset($_SESSION['success_message']); ?>
-                <?php endif; ?>
+                <?php ErrorHandler::displayMessages(); ?>
 
                 <!-- Alerts Section -->
                 <?php if (!empty($alerts)): ?>
