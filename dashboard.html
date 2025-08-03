@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - CollabAI</title>
+    <link rel="stylesheet" href="assets/css/style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-logo">
+                <i class="fas fa-robot"></i>
+                <span>CollabAI</span>
+            </div>
+            <div class="nav-menu">
+                <span id="user-name" class="nav-link"></span>
+                <a href="#" id="logout-btn" class="nav-link btn-outline">Logout</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="dashboard">
+        <div class="dashboard-header">
+            <h1>My Sessions</h1>
+            <button class="btn btn-primary" onclick="showCreateSessionModal()">
+                <i class="fas fa-plus"></i> Create New Session
+            </button>
+        </div>
+
+        <div id="alert-container"></div>
+
+        <div id="sessions-container">
+            <div class="sessions-grid" id="sessions-grid">
+                <!-- Sessions will be loaded here -->
+            </div>
+        </div>
+
+        <!-- Loading state -->
+        <div id="loading-state" class="text-center" style="padding: 60px;">
+            <i class="fas fa-spinner fa-spin" style="font-size: 2rem; color: #4f46e5;"></i>
+            <p style="margin-top: 20px; color: #64748b;">Loading your sessions...</p>
+        </div>
+
+        <!-- Empty state -->
+        <div id="empty-state" class="text-center hidden" style="padding: 60px;">
+            <i class="fas fa-comments" style="font-size: 4rem; color: #e5e7eb; margin-bottom: 20px;"></i>
+            <h3 style="color: #1e293b; margin-bottom: 10px;">No sessions yet</h3>
+            <p style="color: #64748b; margin-bottom: 30px;">Create your first AI collaboration session to get started</p>
+            <button class="btn btn-primary" onclick="showCreateSessionModal()">
+                <i class="fas fa-plus"></i> Create Your First Session
+            </button>
+        </div>
+    </div>
+
+    <!-- Create Session Modal -->
+    <div id="create-session-modal" class="modal hidden">
+        <div class="modal-overlay" onclick="hideCreateSessionModal()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Create New Session</h3>
+                <button class="modal-close" onclick="hideCreateSessionModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="create-session-form">
+                <div class="form-group">
+                    <label for="session-title">Session Title</label>
+                    <input type="text" id="session-title" name="title" required 
+                           placeholder="e.g., Marketing Strategy Brainstorm">
+                </div>
+                
+                <div class="form-group">
+                    <label for="session-description">Description (Optional)</label>
+                    <textarea id="session-description" name="description" 
+                              placeholder="Brief description of what this session is about..."></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="ai-model">AI Model</label>
+                    <select id="ai-model" name="ai_model">
+                        <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                        <option value="gpt-4">GPT-4</option>
+                        <option value="claude-3">Claude 3</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="max-participants">Maximum Participants</label>
+                    <input type="number" id="max-participants" name="max_participants" 
+                           value="10" min="2" max="50">
+                </div>
+                
+                <div class="form-group">
+                    <label for="access-code">Access Code (Optional)</label>
+                    <input type="text" id="access-code" name="access_code" 
+                           placeholder="Leave empty for no access code">
+                </div>
+                
+                <div class="form-group">
+                    <label for="expires-at">Session Expiry (Optional)</label>
+                    <input type="datetime-local" id="expires-at" name="expires_at">
+                </div>
+                
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-outline" onclick="hideCreateSessionModal()">
+                        Cancel
+                    </button>
+                    <button type="submit" class="btn btn-primary">
+                        <span id="create-session-text">Create Session</span>
+                        <span id="create-session-loading" class="hidden">
+                            <i class="fas fa-spinner fa-spin"></i> Creating...
+                        </span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let currentUser = null;
+
+        // Check authentication on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            checkAuth();
+        });
+
+        async function checkAuth() {
+            try {
+                const response = await fetch('api/auth/check-session.php');
+                const result = await response.json();
+                
+                if (result.success) {
+                    currentUser = result.user;
+                    document.getElementById('user-name').textContent = `Welcome, ${result.user.full_name}`;
+                    loadSessions();
+                } else {
+                    window.location.href = 'login.html';
+                }
+            } catch (error) {
+                console.error('Auth check error:', error);
+                window.location.href = 'login.html';
+            }
+        }
+
+        async function loadSessions() {
+            try {
+                const response = await fetch('api/sessions/list.php');
+                const result = await response.json();
+                
+                document.getElementById('loading-state').classList.add('hidden');
+                
+                if (result.success && result.sessions.length > 0) {
+                    displaySessions(result.sessions);
+                } else {
+                    document.getElementById('empty-state').classList.remove('hidden');
+                }
+            } catch (error) {
+                console.error('Load sessions error:', error);
+                document.getElementById('loading-state').classList.add('hidden');
+                showAlert('Failed to load sessions', 'error');
+            }
+        }
+
+        function displaySessions(sessions) {
+            const container = document.getElementById('sessions-grid');
+            container.innerHTML = '';
+            
+            sessions.forEach(session => {
+                const sessionCard = createSessionCard(session);
+                container.appendChild(sessionCard);
+            });
+            
+            document.getElementById('sessions-container').classList.remove('hidden');
+        }
+
+        function createSessionCard(session) {
+            const card = document.createElement('div');
+            card.className = 'session-card';
+            
+            const statusBadge = session.is_active ? 
+                '<span style="background: #10b981; color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem;">Active</span>' :
+                '<span style="background: #6b7280; color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem;">Inactive</span>';
+            
+            const expiryInfo = session.expires_at ? 
+                `<p style="color: #ef4444; font-size: 0.8rem;"><i class="fas fa-clock"></i> Expires: ${new Date(session.expires_at).toLocaleDateString()}</p>` : '';
+            
+            card.innerHTML = `
+                <div class="session-title">${session.title}</div>
+                <div class="session-info">
+                    <p><i class="fas fa-users"></i> ${session.participant_count || 0} participants</p>
+                    <p><i class="fas fa-comments"></i> ${session.message_count || 0} messages</p>
+                    <p><i class="fas fa-robot"></i> ${session.ai_model}</p>
+                    ${expiryInfo}
+                    <p style="margin-top: 10px;">${statusBadge}</p>
+                </div>
+                <div class="session-actions">
+                    <a href="chat.html?session=${session.session_id}" class="btn btn-primary">
+                        <i class="fas fa-comments"></i> Join Chat
+                    </a>
+                    <button class="btn btn-outline" onclick="manageSession('${session.session_id}')">
+                        <i class="fas fa-cog"></i> Manage
+                    </button>
+                </div>
+            `;
+            
+            return card;
+        }
+
+        function showCreateSessionModal() {
+            document.getElementById('create-session-modal').classList.remove('hidden');
+        }
+
+        function hideCreateSessionModal() {
+            document.getElementById('create-session-modal').classList.add('hidden');
+            document.getElementById('create-session-form').reset();
+        }
+
+        document.getElementById('create-session-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const submitBtn = this.querySelector('button[type="submit"]');
+            const createText = document.getElementById('create-session-text');
+            const createLoading = document.getElementById('create-session-loading');
+            
+            createText.classList.add('hidden');
+            createLoading.classList.remove('hidden');
+            submitBtn.disabled = true;
+            
+            const formData = new FormData(this);
+            
+            try {
+                const response = await fetch('api/sessions/create.php', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showAlert('Session created successfully!', 'success');
+                    hideCreateSessionModal();
+                    loadSessions();
+                } else {
+                    showAlert(result.message || 'Failed to create session', 'error');
+                }
+            } catch (error) {
+                console.error('Create session error:', error);
+                showAlert('An error occurred while creating the session', 'error');
+            } finally {
+                createText.classList.remove('hidden');
+                createLoading.classList.add('hidden');
+                submitBtn.disabled = false;
+            }
+        });
+
+        function manageSession(sessionId) {
+            window.location.href = `session-manage.html?session=${sessionId}`;
+        }
+
+        document.getElementById('logout-btn').addEventListener('click', async function(e) {
+            e.preventDefault();
+            
+            try {
+                await fetch('api/auth/logout.php', { method: 'POST' });
+                window.location.href = 'index.html';
+            } catch (error) {
+                console.error('Logout error:', error);
+                window.location.href = 'index.html';
+            }
+        });
+
+        function showAlert(message, type) {
+            const container = document.getElementById('alert-container');
+            container.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
+            
+            setTimeout(() => {
+                container.innerHTML = '';
+            }, 5000);
+        }
+    </script>
+
+    <style>
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            padding: 0;
+            max-width: 500px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            position: relative;
+            z-index: 1001;
+        }
+
+        .modal-header {
+            padding: 20px 20px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #e5e7eb;
+            margin-bottom: 20px;
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            color: #1e293b;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 1.2rem;
+            color: #64748b;
+            cursor: pointer;
+            padding: 5px;
+        }
+
+        .modal-content form {
+            padding: 0 20px 20px;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #e5e7eb;
+        }
+    </style>
+</body>
+</html>

@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Session - CollabAI</title>
+    <link rel="stylesheet" href="assets/css/style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-logo">
+                <i class="fas fa-robot"></i>
+                <span>CollabAI</span>
+            </div>
+            <div class="nav-menu">
+                <a href="dashboard.html" class="nav-link">
+                    <i class="fas fa-arrow-left"></i> Back to Dashboard
+                </a>
+                <span id="user-name" class="nav-link"></span>
+                <a href="#" id="logout-btn" class="nav-link btn-outline">Logout</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="chat-container">
+        <!-- Sidebar -->
+        <div class="chat-sidebar">
+            <div class="chat-header">
+                <div class="chat-title" id="session-title">Loading...</div>
+                <div class="chat-info" id="session-info">Connecting...</div>
+                <div style="margin-top: 10px;">
+                    <button class="btn btn-outline" style="font-size: 0.8rem; padding: 6px 12px;" onclick="showInviteModal()">
+                        <i class="fas fa-user-plus"></i> Invite
+                    </button>
+                    <button class="btn btn-outline" style="font-size: 0.8rem; padding: 6px 12px;" onclick="showExportModal()">
+                        <i class="fas fa-download"></i> Export
+                    </button>
+                </div>
+            </div>
+            
+            <div class="participants">
+                <h3>Participants (<span id="participant-count">0</span>)</h3>
+                <div id="participants-list">
+                    <!-- Participants will be loaded here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Chat Area -->
+        <div class="chat-main">
+            <div class="chat-messages" id="chat-messages">
+                <!-- Messages will be loaded here -->
+            </div>
+            
+            <div id="typing-indicator" class="typing-indicator hidden">
+                <span id="typing-text">Someone is typing</span>
+                <div class="typing-dots">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+            </div>
+
+            <div class="chat-input-container">
+                <form class="chat-input-form" id="message-form">
+                    <textarea 
+                        id="message-input" 
+                        class="chat-input" 
+                        placeholder="Type your message..." 
+                        rows="1"
+                        maxlength="2000"></textarea>
+                    <button type="submit" class="chat-send-btn" id="send-btn">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Invite Modal -->
+    <div id="invite-modal" class="modal hidden">
+        <div class="modal-overlay" onclick="hideInviteModal()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Invite Participants</h3>
+                <button class="modal-close" onclick="hideInviteModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="invite-form">
+                <div class="form-group">
+                    <label for="invite-emails">Email Addresses</label>
+                    <textarea id="invite-emails" name="emails" required 
+                              placeholder="Enter email addresses, one per line or comma-separated"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="invite-role">Role</label>
+                    <select id="invite-role" name="role">
+                        <option value="viewer">Viewer (Can view messages only)</option>
+                        <option value="editor">Editor (Can send messages)</option>
+                    </select>
+                </div>
+                
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-outline" onclick="hideInviteModal()">
+                        Cancel
+                    </button>
+                    <button type="submit" class="btn btn-primary">
+                        <span id="invite-text">Send Invitations</span>
+                        <span id="invite-loading" class="hidden">
+                            <i class="fas fa-spinner fa-spin"></i> Sending...
+                        </span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Export Modal -->
+    <div id="export-modal" class="modal hidden">
+        <div class="modal-overlay" onclick="hideExportModal()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Export Chat Session</h3>
+                <button class="modal-close" onclick="hideExportModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div style="padding: 0 20px 20px;">
+                <div class="form-group">
+                    <label>Export Format</label>
+                    <div style="display: flex; gap: 10px; margin-top: 10px;">
+                        <button class="btn btn-primary" onclick="exportSession('pdf')">
+                            <i class="fas fa-file-pdf"></i> PDF
+                        </button>
+                        <button class="btn btn-primary" onclick="exportSession('markdown')">
+                            <i class="fas fa-file-text"></i> Markdown
+                        </button>
+                        <button class="btn btn-primary" onclick="exportSession('docx')">
+                            <i class="fas fa-file-word"></i> Word
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentUser = null;
+        let currentSession = null;
+        let sessionId = null;
+        let lastMessageId = 0;
+        let pollInterval = null;
+        let typingTimeout = null;
+
+        // Get session ID from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        sessionId = urlParams.get('session');
+
+        if (!sessionId) {
+            alert('No session specified');
+            window.location.href = 'dashboard.html';
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            checkAuthAndLoadSession();
+            setupEventListeners();
+        });
+
+        async function checkAuthAndLoadSession() {
+            try {
+                const response = await fetch('api/auth/check-session.php');
+                const result = await response.json();
+                
+                if (result.success) {
+                    currentUser = result.user;
+                    document.getElementById('user-name').textContent = result.user.full_name;
+                    await loadSession();
+                    await loadMessages();
+                    await loadParticipants();
+                    startPolling();
+                } else {
+                    window.location.href = 'login.html';
+                }
+            } catch (error) {
+                console.error('Auth check error:', error);
+                window.location.href = 'login.html';
+            }
+        }
+
+        async function loadSession() {
+            try {
+                const response = await fetch(`api/sessions/get.php?session_id=${sessionId}`);
+                const result = await response.json();
+                
+                if (result.success) {
+                    currentSession = result.session;
+                    document.getElementById('session-title').textContent = result.session.title;
+                    document.getElementById('session-info').textContent = 
+                        `${result.session.ai_model} • ${result.session.participant_count} participants`;
+                    
+                    // Check if user has permission to send messages
+                    const canSendMessages = result.session.user_role === 'owner' || result.session.user_role === 'editor';
+                    document.getElementById('message-input').disabled = !canSendMessages;
+                    document.getElementById('send-btn').disabled = !canSendMessages;
+                    
+                    if (!canSendMessages) {
+                        document.getElementById('message-input').placeholder = 'You have view-only access to this session';
+                    }
+                } else {
+                    alert(result.message || 'Failed to load session');
+                    window.location.href = 'dashboard.html';
+                }
+            } catch (error) {
+                console.error('Load session error:', error);
+                alert('Failed to load session');
+                window.location.href = 'dashboard.html';
+            }
+        }
+
+        async function loadMessages() {
+            try {
+                const response = await fetch(`api/messages/list.php?session_id=${sessionId}&after=${lastMessageId}`);
+                const result = await response.json();
+                
+                if (result.success && result.messages.length > 0) {
+                    const messagesContainer = document.getElementById('chat-messages');
+                    
+                    result.messages.forEach(message => {
+                        if (message.id > lastMessageId) {
+                            lastMessageId = message.id;
+                            appendMessage(message);
+                        }
+                    });
+                    
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }
+            } catch (error) {
+                console.error('Load messages error:', error);
+            }
+        }
+
+        async function loadParticipants() {
+            try {
+                const response = await fetch(`api/sessions/participants.php?session_id=${sessionId}`);
+                const result = await response.json();
+                
+                if (result.success) {
+                    displayParticipants(result.participants);
+                }
+            } catch (error) {
+                console.error('Load participants error:', error);
+            }
+        }
+
+        function displayParticipants(participants) {
+            const container = document.getElementById('participants-list');
+            const countElement = document.getElementById('participant-count');
+            
+            container.innerHTML = '';
+            countElement.textContent = participants.length;
+            
+            participants.forEach(participant => {
+                const participantElement = document.createElement('div');
+                participantElement.className = `participant ${participant.is_online ? 'online' : ''}`;
+                
+                participantElement.innerHTML = `
+                    <div class="participant-avatar">
+                        ${participant.full_name.charAt(0).toUpperCase()}
+                    </div>
+                    <div class="participant-info">
+                        <div class="participant-name">${participant.full_name}</div>
+                        <div class="participant-role">${participant.role}</div>
+                    </div>
+                `;
+                
+                container.appendChild(participantElement);
+            });
+        }
+
+        function appendMessage(message) {
+            const messagesContainer = document.getElementById('chat-messages');
+            const messageElement = document.createElement('div');
+            messageElement.className = `message ${message.message_type}`;
+            
+            const avatar = message.message_type === 'ai' ? 'AI' : 
+                          message.message_type === 'system' ? 'SYS' :
+                          (message.full_name ? message.full_name.charAt(0).toUpperCase() : 'U');
+            
+            const timestamp = new Date(message.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            
+            messageElement.innerHTML = `
+                <div class="message-avatar">${avatar}</div>
+                <div class="message-content">
+                    <div class="message-header">
+                        <span class="message-author">
+                            ${message.message_type === 'ai' ? 'AI Assistant' : 
+                              message.message_type === 'system' ? 'System' : 
+                              message.full_name || 'Unknown User'}
+                        </span>
+                        <span class="message-time">${timestamp}</span>
+                    </div>
+                    <div class="message-text">${escapeHtml(message.content)}</div>
+                </div>
+            `;
+            
+            messagesContainer.appendChild(messageElement);
+        }
+
+        function setupEventListeners() {
+            // Message form submission
+            document.getElementById('message-form').addEventListener('submit', async function(e) {
+                e.preventDefault();
+                await sendMessage();
+            });
+
+            // Auto-resize textarea
+            const messageInput = document.getElementById('message-input');
+            messageInput.addEventListener('input', function() {
+                this.style.height = 'auto';
+                this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+                
+                // Handle typing indicator
+                clearTimeout(typingTimeout);
+                updateTypingStatus(true);
+                
+                typingTimeout = setTimeout(() => {
+                    updateTypingStatus(false);
+                }, 2000);
+            });
+
+            // Logout
+            document.getElementById('logout-btn').addEventListener('click', async function(e) {
+                e.preventDefault();
+                try {
+                    await fetch('api/auth/logout.php', { method: 'POST' });
+                    window.location.href = 'index.html';
+                } catch (error) {
+                    window.location.href = 'index.html';
+                }
+            });
+
+            // Invite form
+            document.getElementById('invite-form').addEventListener('submit', handleInvite);
+        }
+
+        async function sendMessage() {
+            const messageInput = document.getElementById('message-input');
+            const sendBtn = document.getElementById('send-btn');
+            const content = messageInput.value.trim();
+            
+            if (!content) return;
+            
+            sendBtn.disabled = true;
+            messageInput.disabled = true;
+            
+            try {
+                const formData = new FormData();
+                formData.append('session_id', sessionId);
+                formData.append('content', content);
+                
+                const response = await fetch('api/messages/send.php', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    messageInput.value = '';
+                    messageInput.style.height = 'auto';
+                    updateTypingStatus(false);
+                    
+                    // Message will be added via polling
+                } else {
+                    alert(result.message || 'Failed to send message');
+                }
+            } catch (error) {
+                console.error('Send message error:', error);
+                alert('Failed to send message');
+            } finally {
+                sendBtn.disabled = false;
+                messageInput.disabled = false;
+                messageInput.focus();
+            }
+        }
+
+        async function updateTypingStatus(isTyping) {
+            try {
+                const formData = new FormData();
+                formData.append('session_id', sessionId);
+                formData.append('is_typing', isTyping ? '1' : '0');
+                
+                await fetch('api/presence/typing.php', {
+                    method: 'POST',
+                    body: formData
+                });
+            } catch (error) {
+                console.error('Update typing status error:', error);
+            }
+        }
+
+        function startPolling() {
+            // Poll for new messages and updates every 2 seconds
+            pollInterval = setInterval(async () => {
+                await loadMessages();
+                await loadParticipants();
+                await checkTypingIndicators();
+            }, 2000);
+        }
+
+        async function checkTypingIndicators() {
+            try {
+                const response = await fetch(`api/presence/typing.php?session_id=${sessionId}`);
+                const result = await response.json();
+                
+                const typingIndicator = document.getElementById('typing-indicator');
+                const typingText = document.getElementById('typing-text');
+                
+                if (result.success && result.typing_users.length > 0) {
+                    const typingNames = result.typing_users
+                        .filter(user => user.user_id !== currentUser.id)
+                        .map(user => user.full_name);
+                    
+                    if (typingNames.length > 0) {
+                        if (typingNames.length === 1) {
+                            typingText.textContent = `${typingNames[0]} is typing`;
+                        } else {
+                            typingText.textContent = `${typingNames.join(', ')} are typing`;
+                        }
+                        typingIndicator.classList.remove('hidden');
+                    } else {
+                        typingIndicator.classList.add('hidden');
+                    }
+                } else {
+                    typingIndicator.classList.add('hidden');
+                }
+            } catch (error) {
+                console.error('Check typing indicators error:', error);
+            }
+        }
+
+        // Modal functions
+        function showInviteModal() {
+            if (currentSession && currentSession.user_role === 'owner') {
+                document.getElementById('invite-modal').classList.remove('hidden');
+            } else {
+                alert('Only session owners can invite participants');
+            }
+        }
+
+        function hideInviteModal() {
+            document.getElementById('invite-modal').classList.add('hidden');
+            document.getElementById('invite-form').reset();
+        }
+
+        function showExportModal() {
+            document.getElementById('export-modal').classList.remove('hidden');
+        }
+
+        function hideExportModal() {
+            document.getElementById('export-modal').classList.add('hidden');
+        }
+
+        async function handleInvite(e) {
+            e.preventDefault();
+            
+            const inviteText = document.getElementById('invite-text');
+            const inviteLoading = document.getElementById('invite-loading');
+            
+            inviteText.classList.add('hidden');
+            inviteLoading.classList.remove('hidden');
+            
+            const formData = new FormData(e.target);
+            formData.append('session_id', sessionId);
+            
+            try {
+                const response = await fetch('api/sessions/invite.php', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert('Invitations sent successfully!');
+                    hideInviteModal();
+                } else {
+                    alert(result.message || 'Failed to send invitations');
+                }
+            } catch (error) {
+                console.error('Invite error:', error);
+                alert('Failed to send invitations');
+            } finally {
+                inviteText.classList.remove('hidden');
+                inviteLoading.classList.add('hidden');
+            }
+        }
+
+        async function exportSession(format) {
+            try {
+                hideExportModal();
+                const response = await fetch(`api/export/session.php?session_id=${sessionId}&format=${format}`);
+                
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${currentSession.title}-${new Date().toISOString().split('T')[0]}.${format}`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                } else {
+                    alert('Export failed');
+                }
+            } catch (error) {
+                console.error('Export error:', error);
+                alert('Export failed');
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', function() {
+            if (pollInterval) {
+                clearInterval(pollInterval);
+            }
+            updateTypingStatus(false);
+        });
+    </script>
+</body>
+</html>

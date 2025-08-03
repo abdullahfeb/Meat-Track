@@ -1,0 +1,161 @@
+<?php
+session_start();
+header('Content-Type: application/json');
+
+require_once '../../config/database.php';
+
+// Check authentication
+if (!isset($_SESSION['user_id'])) {
+    echo json_encode(['success' => false, 'message' => 'Not authenticated']);
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['success' => false, 'message' => 'Method not allowed']);
+    exit;
+}
+
+try {
+    $userId = $_SESSION['user_id'];
+    $sessionId = $_POST['session_id'] ?? '';
+    $content = trim($_POST['content'] ?? '');
+
+    // Validate input
+    if (empty($sessionId) || empty($content)) {
+        echo json_encode(['success' => false, 'message' => 'Session ID and content are required']);
+        exit;
+    }
+
+    if (strlen($content) > 2000) {
+        echo json_encode(['success' => false, 'message' => 'Message too long (max 2000 characters)']);
+        exit;
+    }
+
+    // Check if user has permission to send messages in this session
+    $sessionSql = "SELECT s.*, sp.role as user_role 
+                   FROM chat_sessions s
+                   LEFT JOIN session_participants sp ON s.session_id = sp.session_id AND sp.user_id = ?
+                   WHERE s.session_id = ?";
+    
+    $session = $db->fetchOne($sessionSql, [$userId, $sessionId]);
+    
+    if (!$session) {
+        echo json_encode(['success' => false, 'message' => 'Session not found']);
+        exit;
+    }
+
+    if (!$session['user_role']) {
+        echo json_encode(['success' => false, 'message' => 'Access denied']);
+        exit;
+    }
+
+    // Check if session is active and not expired
+    $isExpired = $session['expires_at'] && strtotime($session['expires_at']) <= time();
+    
+    if (!$session['is_active'] || $isExpired) {
+        echo json_encode(['success' => false, 'message' => 'Session is no longer active']);
+        exit;
+    }
+
+    // Check if user has editor or owner role
+    if (!in_array($session['user_role'], ['owner', 'editor'])) {
+        echo json_encode(['success' => false, 'message' => 'You do not have permission to send messages']);
+        exit;
+    }
+
+    $db->beginTransaction();
+
+    try {
+        // Insert user message
+        $messageSql = "INSERT INTO messages (session_id, user_id, message_type, content) VALUES (?, ?, 'user', ?)";
+        $db->execute($messageSql, [$sessionId, $userId, $content]);
+        $messageId = $db->lastInsertId();
+
+        // Log activity
+        $logSql = "INSERT INTO activity_log (session_id, user_id, action_type, action_details, ip_address, user_agent) 
+                   VALUES (?, ?, 'message_sent', ?, ?, ?)";
+        $db->execute($logSql, [
+            $sessionId,
+            $userId,
+            json_encode(['message_id' => $messageId, 'content_length' => strlen($content)]),
+            $_SERVER['REMOTE_ADDR'] ?? null,
+            $_SERVER['HTTP_USER_AGENT'] ?? null
+        ]);
+
+        // Update session timestamp
+        $updateSessionSql = "UPDATE chat_sessions SET updated_at = NOW() WHERE session_id = ?";
+        $db->execute($updateSessionSql, [$sessionId]);
+
+        // Clear typing status
+        $clearTypingSql = "UPDATE user_presence SET is_typing = 0, typing_started_at = NULL WHERE user_id = ?";
+        $db->execute($clearTypingSql, [$userId]);
+
+        $db->commit();
+
+        // Generate AI response (simplified for demo)
+        generateAIResponse($sessionId, $content, $session['ai_model']);
+
+        echo json_encode([
+            'success' => true,
+            'message' => 'Message sent successfully',
+            'message_id' => $messageId
+        ]);
+
+    } catch (Exception $e) {
+        $db->rollback();
+        throw $e;
+    }
+
+} catch (Exception $e) {
+    error_log('Send message error: ' . $e->getMessage());
+    echo json_encode(['success' => false, 'message' => 'Failed to send message']);
+}
+
+function generateAIResponse($sessionId, $userMessage, $aiModel) {
+    global $db;
+    
+    try {
+        // Simple AI response simulation
+        // In a real application, you would integrate with actual AI APIs like OpenAI
+        
+        $responses = [
+            "That's an interesting point. Let me help you explore this further.",
+            "I understand your question. Here are some thoughts on that topic.",
+            "Based on what you've shared, I can suggest a few approaches.",
+            "That's a great question! Let me break this down for you.",
+            "I see what you're asking about. Here's my perspective on this.",
+            "Thank you for that input. Building on your idea, I would suggest...",
+            "That's a thoughtful observation. Let me add some context to that.",
+            "Excellent question! This is something that many teams face."
+        ];
+        
+        $aiResponse = $responses[array_rand($responses)] . " (This is a demo response from " . $aiModel . ". In production, this would be generated by the actual AI model.)";
+        
+        // Simulate some processing delay
+        sleep(1);
+        
+        // Insert AI response
+        $aiMessageSql = "INSERT INTO messages (session_id, message_type, content, metadata) VALUES (?, 'ai', ?, ?)";
+        $metadata = json_encode([
+            'model' => $aiModel,
+            'timestamp' => date('Y-m-d H:i:s'),
+            'demo_mode' => true
+        ]);
+        
+        $db->execute($aiMessageSql, [$sessionId, $aiResponse, $metadata]);
+        
+        // Log AI response
+        $logSql = "INSERT INTO activity_log (session_id, action_type, action_details) 
+                   VALUES (?, 'ai_response', ?)";
+        $db->execute($logSql, [
+            $sessionId,
+            json_encode(['model' => $aiModel, 'response_length' => strlen($aiResponse)])
+        ]);
+        
+    } catch (Exception $e) {
+        error_log('AI response error: ' . $e->getMessage());
+        // Don't throw error - the user message was already saved successfully
+    }
+}
+?>
